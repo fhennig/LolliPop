@@ -59,8 +59,11 @@ export type DeconvoluteArgs = {
     namefield?: string;
     /** What LolliPop prints. */
     log?: Log;
-    /** Called with the indices each bootstrap round draws, for tests. */
-    onResample?: (randIdcs: number[]) => void;
+    /**
+     * Called with the indices each bootstrap round draws, for tests, and the mutations they index
+     * (the first half; the second half are their complements).
+     */
+    onResample?: (randIdcs: number[], mutations: readonly Cell[]) => void;
     /** Called with the loss of every regression, in order, for tests. */
     onLoss?: (loss: number) => void;
 };
@@ -112,7 +115,7 @@ type DeconvoluteBootstrapArgs = {
     confintName: string | null;
     namefield: string;
     random: RandomState;
-    onResample?: (randIdcs: number[]) => void;
+    onResample?: (randIdcs: number[], mutations: readonly Cell[]) => void;
     onLoss?: (loss: number) => void;
 };
 
@@ -153,7 +156,7 @@ function deconvoluteBootstrap({
             }
             const mutations = unique(locDf.map((row) => row[namefield]));
             const { dfSampled, randIdcs } = resampleMutations(locDf, mutations, random, namefield);
-            onResample?.(randIdcs);
+            onResample?.(randIdcs, mutations);
             tempDfb = dfSampled;
         } else {
             // just run one on everything

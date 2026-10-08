@@ -10,7 +10,7 @@ import { deconvolute, type DeconvConfig } from './deconvolute.js';
 import { type Log } from './preprocessors.js';
 import { PRESETS } from './presets.js';
 import { type RandomState } from './numeric/randomState.js';
-import { type Row } from './table.js';
+import { type Cell, type Row } from './table.js';
 
 /** The extra variant that takes up what the panel doesn't explain. */
 export const UNDETERMINED = 'undetermined';
@@ -34,6 +34,8 @@ export type DeconvolveInput = {
     /** The seed or generator of the bootstrap; by default, seed 0. */
     random?: RandomState | number;
     log?: Log;
+    /** Called with the draws of each bootstrap round, for tests (see `deconvolute`). */
+    onResample?: (randIdcs: number[], mutations: readonly Cell[]) => void;
 };
 
 export type DeconvolutionEstimate = {
@@ -60,6 +62,7 @@ export function deconvolve({
     config = PRESETS.deconv_bootstrap_cowwid,
     random,
     log,
+    onResample,
 }: DeconvolveInput): DeconvolutionResult {
     const lineages = Object.keys(signatures);
     const variants = [...lineages, UNDETERMINED];
@@ -85,6 +88,7 @@ export function deconvolve({
         deconvConfig: config,
         random,
         log,
+        onResample,
     });
 
     const byDate = new Map<string, Map<string, DeconvolutionEstimate>>();
