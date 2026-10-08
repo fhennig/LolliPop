@@ -1,0 +1,33 @@
+{
+    "name": "lollipop",
+    "version": "0.0.0",
+    "description": "TypeScript port of LolliPop's kernel deconvolution for wastewater genomics",
+    "license": "GPL-3.0-or-later",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "fuzz": "node fuzz/run.mjs",
+        "format": "prettier --write .",
+        "check-format": "prettier --check ."
+    },
+    "devDependencies": {
+        "@types/node": "^22.20.5",
+        "prettier": "^3.9.9",
+        "tsx": "^4.23.15",
+        "typescript": "^5.9.3",
+        "vitest": "^3.2.7"
+    }
+}

@@ -1,0 +1,3 @@
+dist
+fuzz/corpus
+fuzz/out

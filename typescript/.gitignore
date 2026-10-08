@@ -1,0 +1,4 @@
+node_modules
+dist
+fuzz/out
+fuzz/.venv
