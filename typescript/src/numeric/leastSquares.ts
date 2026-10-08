@@ -7,7 +7,7 @@
  *
  * SciPy's trust-region solver (`trf`) has no counterpart in JavaScript, and porting it would buy
  * little: it stops where its tolerances say the loss is flat enough, not at the minimum. This
- * solves the same problem to the minimum instead, with projected Newton steps (Bertsekas). For the
+ * solves the same problem to the minimum instead, with an active-set Newton method. For the
  * convex losses (`linear`, `soft_l1`, `huber`) the minimum is unique wherever the variants can be
  * told apart, so the two agree up to SciPy's stopping point; for the non-convex ones (`cauchy`,
  * `arctan`), both find a local minimum from the same starting point.
@@ -66,6 +66,8 @@ const MAX_ITERATIONS = 500;
 const X_TOLERANCE = 1e-14;
 /** Stop when the cost decreases by less than this, relatively, three times in a row. */
 const STALL_TOLERANCE = 1e-15;
+/** Coefficients this close to a bound are on it. */
+const BOUND_TOLERANCE = 1e-14;
 /** Armijo's sufficient decrease. */
 const SIGMA = 1e-4;
 
@@ -151,37 +153,83 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
             }
         });
 
-        // Bertsekas' ε-active set: coefficients at (or very near) a bound that the gradient pushes
-        // against it. They take a gradient step, the others a Newton step.
-        const projectedGradient = Math.max(...beta.map((value, j) => Math.abs(value - clip(value - gradient[j]))));
-        if (projectedGradient === 0) {
-            break;
-        }
-        const epsilon = Math.min(1e-6 * (upper - lower), projectedGradient);
-        const free = beta.flatMap((value, j) =>
-            (value <= lower + epsilon && gradient[j] > 0) || (value >= upper - epsilon && gradient[j] < 0) ? [] : [j],
+        // (Rounding leaves coefficients a hair off a bound they reached: put them on it.)
+        const snapped = beta.map((value) =>
+            value - lower <= BOUND_TOLERANCE ? lower : upper - value <= BOUND_TOLERANCE ? upper : value,
         );
+        if (snapped.some((value, j) => value !== beta[j])) {
+            beta = snapped;
+            cost = evaluate(beta, true);
+            iterations--;
+            continue;
+        }
 
-        const direction = beta.map((_, j) => -gradient[j]);
-        if (free.length > 0) {
+        // The active set: coefficients at a bound that the gradient pushes against it. The others
+        // take a Newton step, as long as it doesn't leave the box from a bound (else, that one is
+        // held at its bound too).
+        const fixed = beta.map(
+            (value, j) => (value <= lower && gradient[j] > 0) || (value >= upper && gradient[j] < 0),
+        );
+        let direction: number[] | undefined;
+        for (;;) {
+            const free = beta.flatMap((_, j) => (fixed[j] ? [] : [j]));
+            if (free.length === 0 || free.every((j) => gradient[j] === 0)) {
+                break;
+            }
             const freeGradient = free.map((j) => gradient[j]);
             const step =
                 newtonByQr(patterns, curvatureSums, gradientSums, free) ??
                 solveSpd(restrict(accumulate(curvatureSums), free), freeGradient) ??
                 pseudoSolve(restrict(accumulate(curvatureSums), free), freeGradient) ??
                 solveSpd(restrict(accumulate(gaussNewtonSums), free), freeGradient, true);
-            if (step !== undefined) {
-                free.forEach((j, index) => (direction[j] = -step[index]));
+            const candidate = new Array<number>(n).fill(0);
+            free.forEach((j, index) => (candidate[j] = step === undefined ? -gradient[j] : -step[index]));
+            // not a descent direction (where the Hessian isn't positive definite): steepest descent
+            if (!(free.reduce((sum, j) => sum + gradient[j] * candidate[j], 0) < 0)) {
+                free.forEach((j) => (candidate[j] = -gradient[j]));
             }
+            const leaving = free.filter(
+                (j) => (beta[j] <= lower && candidate[j] < 0) || (beta[j] >= upper && candidate[j] > 0),
+            );
+            if (leaving.length === 0) {
+                direction = candidate;
+                break;
+            }
+            leaving.forEach((j) => (fixed[j] = true));
+        }
+        if (direction === undefined) {
+            break;
         }
 
-        let accepted: { beta: number[]; cost: number } | undefined;
-        for (let alpha = 1; alpha > 1e-20; alpha /= 2) {
-            const candidate = beta.map((value, j) => clip(value + alpha * direction[j]));
+        // The longest step that stays in the box, and the coefficient that reaches its bound.
+        let longest = Infinity;
+        let blocking = -1;
+        direction.forEach((d, j) => {
+            const room = d < 0 ? (beta[j] - lower) / -d : d > 0 ? (upper - beta[j]) / d : Infinity;
+            if (room < longest) {
+                longest = room;
+                blocking = j;
+            }
+        });
+        const slope = direction.reduce((sum, d, j) => sum + gradient[j] * d, 0);
+        let accepted: { beta: number[]; cost: number; blocked: boolean } | undefined;
+        for (let alpha = Math.min(1, longest), first = true; alpha > 1e-20; alpha /= 2, first = false) {
+            const candidate = beta.map((value, j) =>
+                alpha === longest && j === blocking
+                    ? direction![j] < 0
+                        ? lower
+                        : upper
+                    : clip(value + alpha * direction![j]),
+            );
             const candidateCost = evaluate(candidate, false);
-            const decrease = beta.reduce((result, value, j) => result + gradient[j] * (value - candidate[j]), 0);
-            if (candidateCost <= cost - SIGMA * decrease || (alpha === 1 && candidateCost <= cost)) {
-                accepted = { beta: candidate, cost: candidateCost };
+            // (Near the minimum, or on a short step to a bound, the decrease can be below rounding:
+            // there, no increase will do.)
+            const roundingFloor =
+                first &&
+                candidateCost <= cost &&
+                (-slope * alpha <= 1e-12 * Math.max(cost, Number.MIN_VALUE) || alpha === longest);
+            if (candidateCost <= cost + SIGMA * alpha * slope || roundingFloor) {
+                accepted = { beta: candidate, cost: candidateCost, blocked: alpha === longest };
                 break;
             }
         }
@@ -192,12 +240,13 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
         const decrease = cost - accepted.cost;
         beta = accepted.beta;
         cost = evaluate(beta, true);
-        if (change <= X_TOLERANCE) {
+        // (A step cut short by a bound only adds that bound to the active set.)
+        if (change <= X_TOLERANCE && !accepted.blocked) {
             break;
         }
         // Along a direction the cost barely depends on, steps may stay large while the cost no
         // longer changes within rounding: stop when it stalls.
-        stalled = decrease <= STALL_TOLERANCE * cost ? stalled + 1 : 0;
+        stalled = decrease <= STALL_TOLERANCE * cost && !accepted.blocked ? stalled + 1 : 0;
         if (stalled >= 3) {
             break;
         }
