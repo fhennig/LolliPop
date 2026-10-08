@@ -41,22 +41,47 @@ export type LeastSquaresResult = {
     iterations: number;
 };
 
-/** ρ(z), ρ′(z) and ρ″(z) of SciPy's losses, for z = (r/f)². */
-function rho(loss: Loss, z: number): [number, number, number] {
+/**
+ * ρ(z), ρ′(z) and ρ″(z) of SciPy's losses, for z = (r/f)², into `out` (this runs once per row and
+ * step, so it doesn't allocate).
+ */
+function rho(loss: Loss, z: number, out: Float64Array): void {
     switch (loss) {
         case 'linear':
-            return [z, 1, 0];
+            out[0] = z;
+            out[1] = 1;
+            out[2] = 0;
+            return;
         case 'soft_l1': {
-            const t = 1 + z;
-            return [2 * (Math.sqrt(t) - 1), t ** -0.5, -0.5 * t ** -1.5];
+            const root = Math.sqrt(1 + z);
+            out[0] = 2 * (root - 1);
+            out[1] = 1 / root;
+            out[2] = -0.5 / (root * root * root);
+            return;
         }
         case 'huber':
-            return z <= 1 ? [z, 1, 0] : [2 * Math.sqrt(z) - 1, z ** -0.5, -0.5 * z ** -1.5];
+            if (z <= 1) {
+                out[0] = z;
+                out[1] = 1;
+                out[2] = 0;
+            } else {
+                const root = Math.sqrt(z);
+                out[0] = 2 * root - 1;
+                out[1] = 1 / root;
+                out[2] = -0.5 / (root * z);
+            }
+            return;
         case 'cauchy':
-            return [Math.log1p(z), 1 / (1 + z), -1 / (1 + z) ** 2];
+            out[0] = Math.log1p(z);
+            out[1] = 1 / (1 + z);
+            out[2] = -1 / ((1 + z) * (1 + z));
+            return;
         case 'arctan': {
             const t = 1 + z * z;
-            return [Math.atan(z), 1 / t, (-2 * z) / (t * t)];
+            out[0] = Math.atan(z);
+            out[1] = 1 / t;
+            out[2] = (-2 * z) / (t * t);
+            return;
         }
     }
 }
@@ -99,6 +124,7 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
     const gradientSums = new Float64Array(patterns.length);
     const curvatureSums = new Float64Array(patterns.length);
     const gaussNewtonSums = new Float64Array(patterns.length);
+    const rhoValues = new Float64Array(3);
 
     const evaluate = (beta: readonly number[], derivatives: boolean): number => {
         for (let p = 0; p < patterns.length; p++) {
@@ -114,9 +140,11 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
             const p = rowPattern[i];
             const residual = k[i] * (fitted[p] - y[i]);
             const z = (residual * residual) / f2;
-            const [value, first, second] = rho(loss, z);
-            cost += value;
+            rho(loss, z, rhoValues);
+            cost += rhoValues[0];
             if (derivatives) {
+                const first = rhoValues[1];
+                const second = rhoValues[2];
                 gradientSums[p] += first * residual * k[i];
                 curvatureSums[p] += (first + 2 * z * second) * k[i] * k[i];
                 gaussNewtonSums[p] += first * k[i] * k[i];
