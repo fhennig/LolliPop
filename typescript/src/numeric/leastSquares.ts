@@ -171,22 +171,25 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
             (value, j) => (value <= lower && gradient[j] > 0) || (value >= upper && gradient[j] < 0),
         );
         let direction: number[] | undefined;
+        let newton = false;
         for (;;) {
             const free = beta.flatMap((_, j) => (fixed[j] ? [] : [j]));
             if (free.length === 0 || free.every((j) => gradient[j] === 0)) {
                 break;
             }
             const freeGradient = free.map((j) => gradient[j]);
-            const step =
+            const newtonStep =
                 newtonByQr(patterns, curvatureSums, gradientSums, free) ??
                 solveSpd(restrict(accumulate(curvatureSums), free), freeGradient) ??
-                pseudoSolve(restrict(accumulate(curvatureSums), free), freeGradient) ??
-                solveSpd(restrict(accumulate(gaussNewtonSums), free), freeGradient, true);
+                pseudoSolve(restrict(accumulate(curvatureSums), free), freeGradient);
+            newton = newtonStep !== undefined;
+            const step = newtonStep ?? solveSpd(restrict(accumulate(gaussNewtonSums), free), freeGradient, true);
             const candidate = new Array<number>(n).fill(0);
             free.forEach((j, index) => (candidate[j] = step === undefined ? -gradient[j] : -step[index]));
             // not a descent direction (where the Hessian isn't positive definite): steepest descent
             if (!(free.reduce((sum, j) => sum + gradient[j] * candidate[j], 0) < 0)) {
                 free.forEach((j) => (candidate[j] = -gradient[j]));
+                newton = false;
             }
             const leaving = free.filter(
                 (j) => (beta[j] <= lower && candidate[j] < 0) || (beta[j] >= upper && candidate[j] > 0),
@@ -235,6 +238,28 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
         }
         if (accepted === undefined) {
             break;
+        }
+        // Without a Newton step (where the loss is linear, as in the outer part of the Huber
+        // loss), a full step can be far too short: go on doubling it while the cost keeps falling.
+        if (!newton && !accepted.blocked) {
+            for (let alpha = 2; ; alpha *= 2) {
+                const reach = Math.min(alpha, longest);
+                const candidate = beta.map((value, j) =>
+                    reach === longest && j === blocking
+                        ? direction![j] < 0
+                            ? lower
+                            : upper
+                        : clip(value + reach * direction![j]),
+                );
+                const candidateCost = evaluate(candidate, false);
+                if (!(candidateCost <= cost + SIGMA * reach * slope && candidateCost < accepted.cost)) {
+                    break;
+                }
+                accepted = { beta: candidate, cost: candidateCost, blocked: reach === longest };
+                if (reach === longest) {
+                    break;
+                }
+            }
         }
         const change = Math.max(...accepted.beta.map((value, j) => Math.abs(value - beta[j])));
         const decrease = cost - accepted.cost;
