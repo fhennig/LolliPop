@@ -112,41 +112,8 @@ npm run fuzz       # the fuzz test on new cases: needs Python (uv), see below
 
 ### The fuzz test
 
-`fuzz/generate.py` makes random cases and runs each through LolliPop's real `deconvolute` command
-(in-process, instrumented), and `fuzz/fuzz.spec.ts` replays them on the port. A case is random data
-and random settings:
-
-- **data**, from one of: a synthetic panel (random lineage tree, random prevalence curves at a few
-  locations, binomial read counts with dropouts, outliers, deletions, `mut`/`shared`/`subset`/`revert`
-  annotations, sometimes indistinguishable or empty signatures); a random slice (location, time window,
-  positions, variants) of the preprint's tally table; a slice of a W-ASAP snapshot
-  (`fuzz/data`); a slice of LolliPop's own test tally;
-- **settings**: renamed and unreported variants, variants lists, `to_drop`, start and end dates,
-  deletions, missing locations or dates (`no_loc`, `no_date`, `location_code`), periods with their own
-  variants (`var_dates`), mutation filters (also the preprint's), and a deconvolution configuration —
-  one of the presets, or a random kernel, bandwidth, `min_tol`, `renormalize`, regressor, loss,
-  `f_scale`, Wald intervals (scale, level, `pseudofrac`, quasi-likelihood, method) or bootstrap.
-
-For each case, the test checks:
-
-1. **the bootstrap draws**: every round draws the same mutations as LolliPop;
-2. **single regressions**, sampled from the run, replayed with LolliPop's inputs: the same NNLS
-   residual, a robust loss as low as SciPy's minimum, the same confidence band from the same
-   coefficients;
-3. **every regression's loss**, in order: the same as LolliPop's (NNLS), or as low as SciPy's minimum
-   (robust);
-4. **the output**: the same rows, and — except with the robust regressor — the same values to 1e-8;
-   or the same failure, where LolliPop fails. (With the robust regressor, where the minimum is flat, the
-   coefficients aren't determined beyond the losses; the differences from SciPy's minimum are in the
-   report, `flatDifferences`.)
-
-The harness records where a value isn't determined — tied variants, a singular or ill-conditioned
-design or Fisher information, a wrong SciPy NNLS — and compares only what is determined there.
-
-`npm run fuzz` sets up a Python environment with [uv](https://docs.astral.sh/uv/) (LolliPop from this
-repository, pandas < 3), generates cases into `fuzz/out/<seed>`, runs the test on them and writes a
-report (`fuzz/out/<seed>/report.json`); arguments: `npm run fuzz -- --count 500 --seed 7 --preprint
-path/to/tallymut_line_full.tsv.zst`. A failing case can be added to `fuzz/corpus`. The preprint's
-tally table is in Git LFS; without it, that source is skipped.
-
-About 2,400 random cases pass as of this writing.
+The fuzz test runs random data and random settings through LolliPop's real `deconvolute` command, and
+checks that the port reproduces it: the same bootstrap draws, the same losses for every regression,
+and the same output, where the output is determined. About 2,800 random cases pass as of this
+writing. How it works, what it checks, and what to do when a case fails is in
+[`fuzz/README.md`](fuzz/README.md).
