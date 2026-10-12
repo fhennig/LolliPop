@@ -89,8 +89,10 @@ where they aren't:
 
 - **Ties.** Where variants have the same signature over the rows a fit sees, only their sum is
   determined.
-- **Ill-conditioning.** Where the design or the Fisher information is (nearly) singular, the split
-  between variants, or the Wald interval, is rounding noise in NumPy too.
+- **Ill-conditioning.** Where the design (with tied variants merged) or the Fisher information is
+  nearly singular, the split between variants, or the Wald interval, is rounding noise in NumPy too.
+  With a condition κ, least squares coefficients are only determined up to about κ²ε, and the
+  tolerance grows accordingly; the losses still have to agree.
 - **SciPy's NNLS bug.** In about 1 case in 400, SciPy 1.18's `nnls` returns a non-optimal
   solution. There, the port finds a lower loss than LolliPop.
 

@@ -81,7 +81,10 @@ export type Ties = {
     empty: boolean;
     /** SciPy's NNLS returned a non-optimal solution in some fit (see `check_nnls`). */
     scipyNnlsWrong?: boolean;
-    /** The largest condition of the (weighted) design of a fit, where above 1e3 (null: singular). */
+    /**
+     * The largest condition of the (weighted) design of a fit, with each group of tied variants
+     * merged into one column, where above 1e3 (null: singular).
+     */
     designCondition?: number | null;
     /** The largest condition of the Fisher information of a Wald interval (null: singular). */
     fisherCondition?: number | null;

@@ -918,20 +918,25 @@ def record_ties(self, date, min_tol, ties):
         entry["fisherCondition"] = (
             None if condition is None or previous is None else max(previous, condition)
         )
-    with np.errstate(all="ignore"):
-        condition = float(np.linalg.cond(X * np.expand_dims(k, 1)))
-    previous = entry.get("designCondition", 0.0)
-    entry["designCondition"] = (
-        None
-        if not np.isfinite(condition) or previous is None
-        else max(previous, condition)
-    )
     names = list(self.variant_names)
     by_column = {}
     for j in range(X.shape[1]):
         by_column.setdefault(X[:, j].tobytes(), []).append(names[j])
     groups = [group for group in by_column.values() if len(group) > 1]
     representatives = [names.index(group[0]) for group in by_column.values()]
+    # The condition of the design with each group of tied variants merged into one column: the
+    # fit is unique there, and it determines the other variants and the sums over the groups.
+    # (With the tied columns, the condition is infinite, and says nothing about the rest.)
+    with np.errstate(all="ignore"):
+        condition = float(
+            np.linalg.cond(X[:, representatives] * np.expand_dims(k, 1))
+        )
+    previous = entry.get("designCondition", 0.0)
+    entry["designCondition"] = (
+        None
+        if not np.isfinite(condition) or previous is None
+        else max(previous, condition)
+    )
     if np.linalg.matrix_rank(X[:, representatives]) < len(representatives):
         entry["all"] = True
     # merge with the groups of the other fits on the date
