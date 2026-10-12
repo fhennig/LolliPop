@@ -42,45 +42,47 @@ export type LeastSquaresResult = {
 };
 
 /**
- * ρ(z), ρ′(z) and ρ″(z) of SciPy's losses, for z = (r/f)², into `out` (this runs once per row and
- * step, so it doesn't allocate).
+ * ρ(z), ρ′(z) and the curvature ρ′(z) + 2zρ″(z) of SciPy's losses, for z = (r/f)², into `out`
+ * (this runs once per row and step, so it doesn't allocate). The curvature (the second derivative
+ * of the loss in the residual, over 2) is in closed form: as ρ′ + 2zρ″, its terms cancel where the
+ * loss is linear (Huber's outer part), and leave rounding noise that looks like curvature.
  */
 function rho(loss: Loss, z: number, out: Float64Array): void {
     switch (loss) {
         case 'linear':
             out[0] = z;
             out[1] = 1;
-            out[2] = 0;
+            out[2] = 1;
             return;
         case 'soft_l1': {
             const root = Math.sqrt(1 + z);
             out[0] = 2 * (root - 1);
             out[1] = 1 / root;
-            out[2] = -0.5 / (root * root * root);
+            out[2] = 1 / (root * root * root);
             return;
         }
         case 'huber':
             if (z <= 1) {
                 out[0] = z;
                 out[1] = 1;
-                out[2] = 0;
+                out[2] = 1;
             } else {
                 const root = Math.sqrt(z);
                 out[0] = 2 * root - 1;
                 out[1] = 1 / root;
-                out[2] = -0.5 / (root * z);
+                out[2] = 0;
             }
             return;
         case 'cauchy':
             out[0] = Math.log1p(z);
             out[1] = 1 / (1 + z);
-            out[2] = -1 / ((1 + z) * (1 + z));
+            out[2] = (1 - z) / ((1 + z) * (1 + z));
             return;
         case 'arctan': {
             const t = 1 + z * z;
             out[0] = Math.atan(z);
             out[1] = 1 / t;
-            out[2] = (-2 * z) / (t * t);
+            out[2] = (1 - 3 * z * z) / (t * t);
             return;
         }
     }
@@ -144,9 +146,9 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
             cost += rhoValues[0];
             if (derivatives) {
                 const first = rhoValues[1];
-                const second = rhoValues[2];
+                const curvature = rhoValues[2];
                 gradientSums[p] += first * residual * k[i];
-                curvatureSums[p] += (first + 2 * z * second) * k[i] * k[i];
+                curvatureSums[p] += curvature * k[i] * k[i];
                 gaussNewtonSums[p] += first * k[i] * k[i];
             }
         }
