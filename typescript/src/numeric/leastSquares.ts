@@ -246,7 +246,9 @@ export function leastSquares(problem: LeastSquaresProblem): LeastSquaresResult {
         });
         const slope = direction.reduce((sum, d, j) => sum + gradient[j] * d, 0);
         let accepted: { beta: number[]; cost: number; blocked: boolean } | undefined;
-        for (let alpha = Math.min(1, longest), first = true; alpha > 1e-20; alpha /= 2, first = false) {
+        // (The first step is always tried: where a coefficient is a hair off the bound the
+        // direction pushes it to, the longest step can be below the floor of the halving.)
+        for (let alpha = Math.min(1, longest), first = true; first || alpha > 1e-20; alpha /= 2, first = false) {
             const candidate = beta.map((value, j) =>
                 alpha === longest && j === blocking
                     ? direction![j] < 0
