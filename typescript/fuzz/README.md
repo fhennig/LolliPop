@@ -11,20 +11,23 @@ npm run fuzz -- --count 500 --seed 7 --preprint path/to/tallymut_line_full.tsv.z
 
 `npm run fuzz` needs [uv](https://docs.astral.sh/uv/). On its first run, it creates a Python
 environment in `fuzz/.venv` with LolliPop from this repository (and `pandas < 3`, see below). It then
-generates the cases into `fuzz/out/<seed>`, runs the test on them, and writes a report to
-`fuzz/out/<seed>/report.json`. The same seed gives the same cases.
+generates the cases into `fuzz/out/<seed>`, evaluates the port on them, prints the cases that
+failed, and writes a report to `fuzz/out/<seed>/report.json`. The same seed gives the same cases.
 
 ## Files
 
-| File                          | What it does                                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------- |
-| `generate.py`                 | makes random cases, runs LolliPop on each (in-process, instrumented) and records the results |
-| `fuzz.spec.ts`                | replays the cases on the port and compares                                                   |
-| `compare.ts`                  | compares output tables, tolerances, the robust loss                                          |
-| `fuzzCase.ts`                 | the format of a case, and loading them                                                       |
-| `run.mjs`                     | `npm run fuzz`: sets up Python, generates, runs the test                                     |
-| `corpus/`                     | a fixed set of cases, run by `npm test`                                                      |
-| `data/wasap_zurich_2026.json` | a snapshot of W-ASAP data, one of the sources                                                |
+The pipeline, in the order it runs:
+
+| File                          | What it does                                                                           |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| `scenarios.py`                | random scenarios: a tally table and the settings for `lollipop deconvolute`            |
+| `run_lollipop.py`             | runs LolliPop on each scenario (in-process, instrumented), and writes it out as a case |
+| `runPort.ts`                  | the format of a case, and running the port on it                                       |
+| `evaluate.ts`                 | the checks: whether the port reproduces what LolliPop did                              |
+| `cli.ts`                      | `npm run fuzz`: sets up Python, generates cases, evaluates them, writes the report     |
+| `fuzz.spec.ts`                | `npm test`: evaluates the corpus                                                       |
+| `corpus/`                     | a fixed set of cases                                                                   |
+| `data/wasap_zurich_2026.json` | a snapshot of W-ASAP data, one of the sources                                          |
 
 ## A case
 
@@ -53,25 +56,24 @@ Each case is drawn from its own seed. It has some data and some settings.
   bandwidth, `min_tol`, `renormalize`, regressor, loss and `f_scale`, with random Wald intervals
   (scale, level, `pseudofrac`, quasi-likelihood, method) or a bootstrap.
 
-`generate.py` writes the tally and the configuration files, and runs `lollipop deconvolute` on
+`run_lollipop.py` writes the tally and the configuration files, and runs `lollipop deconvolute` on
 them in-process. It seeds NumPy's global generator first, so the bootstrap can be replayed. It
 patches LolliPop to record what happens inside the run. Each case is saved as
 `case-<seed>.json.gz` and holds:
 
 - `expected`: the output, or the error LolliPop raised.
-- `expectedTight`: for the robust regressor, the output with every regression solved to the
-  minimum (SciPy with tight tolerances and the exact Jacobian).
 - `draws`: the mutations each bootstrap round drew.
-- `calls`: a sample of single regressions, with their inputs, LolliPop's fit, the minimum and the
-  confidence band.
-- `losses` and `tightLosses`: the loss of every regression, in order.
-- `ties`, `precision`: where a value isn't determined (see below).
+- `calls`: a sample of single regressions, with their inputs, LolliPop's fit, and the confidence
+  band.
+- `losses`: the loss of every regression, in order. With the robust regressor, `tightLosses` too:
+  each regression solved to the minimum (SciPy with tight tolerances and the exact Jacobian).
+- `ties`: where a value isn't determined (see below).
 - `variantOrder` and `locationOrder`: the order LolliPop used. Without a variants list or `--loc`,
   that order comes from a Python set and changes from run to run, so the test reuses LolliPop's.
 
 ## The checks
 
-For each case, `fuzz.spec.ts` checks:
+For each case, `evaluate.ts` checks:
 
 1. **The bootstrap draws.** Every round draws the same mutations as LolliPop.
 2. **Single regressions**, replayed with LolliPop's inputs:
@@ -84,8 +86,8 @@ For each case, `fuzz.spec.ts` checks:
 4. **The output**: the same rows and the same values, to 1e-8. Where LolliPop raised an error, the
    port has to throw too.
 
-Not every value is determined, and the test only compares the ones that are. `generate.py` records
-where they aren't:
+Not every value is determined, and the test only compares the ones that are. `run_lollipop.py`
+records where they aren't:
 
 - **Ties.** Where variants have the same signature over the rows a fit sees, only their sum is
   determined.
@@ -101,18 +103,18 @@ flat, the coefficients aren't pinned down by the losses. So with the robust regr
 
 - the losses are checked as above;
 - the output's rows are checked;
-- the output's values aren't. Their differences from the minimum go into the report
-  (`flatDifferences`).
+- the output's values aren't. Their differences from LolliPop's go into the report
+  (`maxDifference`).
 
 With the non-convex losses (`cauchy`, `arctan`), the two solvers can stop at different local minima,
 so only the output's rows are compared.
 
 ## When a case fails
 
-Run it alone:
+Evaluate it again, alone (without generating anything):
 
 ```sh
-FUZZ_DIR=fuzz/out/<seed> npx vitest run fuzz -t case-<n>
+npm run fuzz -- --dir fuzz/out/<seed> --case case-<n>
 ```
 
 Once it's fixed, copy the case into `corpus/`, so `npm test` keeps checking it.

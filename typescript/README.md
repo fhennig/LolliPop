@@ -114,6 +114,6 @@ npm run fuzz       # the fuzz test on new cases: needs Python (uv), see below
 
 The fuzz test runs random data and random settings through LolliPop's real `deconvolute` command, and
 checks that the port reproduces it: the same bootstrap draws, the same losses for every regression,
-and the same output, where the output is determined. About 2,800 random cases pass as of this
+and the same output, where the output is determined. About 8,000 random cases pass as of this
 writing. How it works, what it checks, and what to do when a case fails is in
 [`fuzz/README.md`](fuzz/README.md).

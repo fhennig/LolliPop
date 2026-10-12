@@ -19,7 +19,7 @@
         "build": "tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
-        "fuzz": "node fuzz/run.mjs",
+        "fuzz": "tsx fuzz/cli.ts",
         "format": "prettier --write .",
         "check-format": "prettier --check ."
     },
