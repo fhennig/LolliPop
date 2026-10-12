@@ -69,8 +69,16 @@ export function compareOutputs(
             skippedValues++;
             return;
         }
-        // An ill-conditioned design loses digits in any solver.
-        const tolerance = Math.max(baseTolerance, 10 * (precision ?? 0), 1e-14 * (ties?.designCondition ?? 0));
+        // An ill-conditioned design loses digits in any solver: with a residual, least squares
+        // coefficients are only determined up to about κ² ε (Wedin), where κ is the design's
+        // condition. (Past that, the losses still have to agree, see "reaches the same losses".)
+        const condition = ties?.designCondition ?? 0;
+        const tolerance = Math.max(
+            baseTolerance,
+            10 * (precision ?? 0),
+            1e-14 * condition,
+            Number.EPSILON * condition * condition,
+        );
         // An ill-conditioned Fisher information amplifies rounding (in NumPy too), and any
         // imprecision of the coefficients it is computed from, by its condition.
         const intervalTolerance =
