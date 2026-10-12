@@ -928,9 +928,7 @@ def record_ties(self, date, min_tol, ties):
     # fit is unique there, and it determines the other variants and the sums over the groups.
     # (With the tied columns, the condition is infinite, and says nothing about the rest.)
     with np.errstate(all="ignore"):
-        condition = float(
-            np.linalg.cond(X[:, representatives] * np.expand_dims(k, 1))
-        )
+        condition = float(np.linalg.cond(X[:, representatives] * np.expand_dims(k, 1)))
     previous = entry.get("designCondition", 0.0)
     entry["designCondition"] = (
         None
